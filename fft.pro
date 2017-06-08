@@ -2,9 +2,14 @@ TEMPLATE=app
 
 QT += sql widgets gui printsupport
 
-SOURCES += ConsoleApplication1/ConsoleApplication1.cpp \
+SOURCES += main.cpp \
 qcustomplot/qcustomplot.cpp
 
 LIBS += -lgsl -lgslcblas
 
 HEADERS += qcustomplot/qcustomplot.h
+
+win32 {
+    INCLUDEPATH += c:/local/gsl/include
+    LIBS += -Lc:/local/gsl/lib
+}
