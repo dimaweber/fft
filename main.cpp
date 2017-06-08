@@ -10,12 +10,17 @@
 #include <gsl/gsl_complex_math.h>
 
 #include <QApplication>
-#include <QDialog>
+#include <QChart>
+#include <QChartView>
 #include <QDateTime>
+#include <QDateTimeAxis>
+#include <QDialog>
+#include <QLineSeries>
 #include <QSqlDatabase>
-#include <QSqlQuery>
 #include <QSqlError>
+#include <QSqlQuery>
 #include <QTabWidget>
+#include <QValueAxis>
 #include <QVariant>
 
 #define USE_SINE
@@ -41,11 +46,23 @@ int main(int argc, char *argv[])
     QCustomPlot* originalPlot = new QCustomPlot(pTab);
     QCustomPlot* filteredPlot = new  QCustomPlot(pTab);
 
-    pTab->addTab(originalPlot, "Original signal");
-    pTab->addTab(transformPlot, "Furie transform");
-    pTab->addTab(filteredPlot, "Filtered transformation");
+    QtCharts::QChart* pChart = new QtCharts::QChart();
+    QtCharts::QChartView* pChartView = new QtCharts::QChartView(pTab);
+    QtCharts::QLineSeries* originalSeries = new QtCharts::QLineSeries(pTab);
+    QtCharts::QLineSeries* restoredSeries = new QtCharts::QLineSeries(pTab);
+
+    pTab->addTab(originalPlot,  "Original signal");
+    pTab->addTab(transformPlot, "Fourier transform");
+    pTab->addTab(filteredPlot,  "Filtered transformation");
+    pTab->addTab(pChartView, "QtChart: original signal");
+
 
     pTab->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+
+    pChart->legend()->hide();
+
+    pChartView->setRenderHint(QPainter::Antialiasing);
+    pChartView->setChart(pChart);
 
     originalPlot->plotLayout()->insertRow(0);
     originalPlot->plotLayout()->addElement(0,0,new QCPPlotTitle(transformPlot, "Spectre"));
@@ -104,8 +121,7 @@ int main(int argc, char *argv[])
     filteredPlot->yAxis->setSubTickCount(0);
     filteredPlot->setAntialiasedElements(QCP::aeAll);
     QCPBars* filteredBars = new QCPBars(filteredPlot->xAxis, filteredPlot->yAxis);
-    filteredPlot->addPlottable(bars);
-    filteredBars->setWidth(1.0 / (15*n));
+    filteredPlot->addPlottable(filteredBars);
     filteredBars->setPen(valuePen);
     filteredBars->setBrush(brush);
     // plot->xAxis->setAutoTicks(false);
@@ -159,15 +175,18 @@ int main(int argc, char *argv[])
     }
     T = times[0].secsTo(times[n-1]);
 #else
+    QDateTime now = QDateTime::currentDateTime();
     for (size_t k = 0; k < n; k++)
     {
         double t = (T / n) * k;
-        double rate = sin(10 * 2 * M_PI * t) + 0.5*sin(5 * 2 * M_PI * t) + 0.25 * sin(2.5 * 2 * M_PI * t) + qrand() % 100/ 100.0 * sin(3*2*M_PI*t);
+        double rate = sin(10 * 2 * M_PI * t) + 0.5*sin(5 * 2 * M_PI * t + M_PI_4) + 0.25 * sin(2.5 * 2 * M_PI * t - M_PI_4)+ /*qrand() % 100/ 100.0 **/ sin(qrand() % 4 *2*M_PI*t);
         last_rate[k] = rate;
         timestamp[k] = k;
         timeLabel[k] = QString::number(T / n * k);
         minRate = qMin(minRate, rate);
         maxRate = qMax(maxRate, rate);
+
+        originalSeries->append(now.addMSecs(t*1000).toMSecsSinceEpoch(), rate);
     }
 #endif
 
@@ -210,16 +229,19 @@ int main(int argc, char *argv[])
     }
 
 
-    double filter_value=.24;
+    double filter_value=.1;
 
     QVector<double> filtered_ampl(n/2);
     double maxFilteredAmpl = 1e-10;
+    size_t maxFilteredIndex = 0;
     for (size_t k=0; k<n/2; k++)
     {
         if (gsl_fcmp(gsl_complex_abs(fft_result[k]) * 2/n, filter_value, 1e-5) == -1)
         {
             GSL_SET_COMPLEX(&fft_result[k], 0,0);
         }
+        else
+            maxFilteredIndex = qMax(maxFilteredIndex, k);
         filtered_ampl[k] = gsl_complex_abs(fft_result[k]) * 2/n;
         maxFilteredAmpl = qMax(maxFilteredAmpl, filtered_ampl[k]);
     }
@@ -239,6 +261,32 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    for (size_t k =0; k<n; k++)
+    {
+        double t = (T / n) * k;
+        restoredSeries->append(now.addMSecs(t*1000).toMSecsSinceEpoch(), halfcomplex_filtered[k]);
+    }
+
+    originalSeries->setColor(Qt::blue);
+    pChart->addSeries(originalSeries);
+    restoredSeries->setColor(Qt::green);
+    pChart->addSeries(restoredSeries);
+
+    //    pChart->createDefaultAxes();
+    QtCharts::QDateTimeAxis* pChartXAxis = new QtCharts::QDateTimeAxis(pChart);
+    pChartXAxis->setTickCount(10);
+    pChartXAxis->setFormat("dd MM yyyy hh:mm:ss.zzz");
+    pChartXAxis->setTitleText("Time");
+    pChartXAxis->setLabelsAngle(60);
+    pChart->addAxis(pChartXAxis, Qt::AlignBottom);
+    originalSeries->attachAxis(pChartXAxis);
+
+    QtCharts::QValueAxis* pChartYAxis = new QtCharts::QValueAxis(pChart);
+    pChartYAxis->setLabelFormat("%d");
+    pChartYAxis->setTitleText("Signal");
+    pChart->addAxis(pChartYAxis, Qt::AlignLeft);
+    originalSeries->attachAxis(pChartYAxis);
+    pChart->setTitle("Original signal");
 
     originalPlot->graph(0)->setData(timestamp, last_rate_orig);
     originalPlot->graph(1)->setData(timestamp, halfcomplex_filtered);
@@ -253,8 +301,9 @@ int main(int argc, char *argv[])
     transformPlot->xAxis->setTickVectorLabels(label);
     transformPlot->yAxis->setRange(0, maxAmpl*1.1);
 
+    filteredBars->setWidth(2.0 / (maxFilteredIndex));
     filteredBars->setData(freq, filtered_ampl);
-    filteredPlot->xAxis->setRange(freq[0] * .9, freq[freq.size()-1] * 1.01);
+    filteredPlot->xAxis->setRange(freq[0] * .9, freq[maxFilteredIndex] * 1.01);
     filteredPlot->xAxis->setTickVector(freq);
     filteredPlot->xAxis->setTickVectorLabels(label);
     filteredPlot->yAxis->setRange(0, maxFilteredAmpl*1.1);

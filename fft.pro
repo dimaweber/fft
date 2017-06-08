@@ -1,6 +1,6 @@
 TEMPLATE=app
 
-QT += sql widgets gui printsupport
+QT += sql widgets gui printsupport charts
 
 SOURCES += main.cpp \
 qcustomplot/qcustomplot.cpp
